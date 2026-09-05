@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Failure Modes</title>
-<meta name="description" content="Fifteen ways an AI analyst got things wrong on a real GIS project — excluding missing data and missing tools.">
+<meta name="description" content="Fourteen ways an AI analyst got things wrong on a real GIS project — excluding missing data and missing tools.">
 <style>
   :root{
     --bg:#fbfaf7; --fg:#1c1b19; --mut:#6b675f; --line:#e6e2d9; --acc:#9a3412;
@@ -51,14 +51,14 @@
 <main>
 <header>
   <p class="kicker">A self-audit, on request</p>
-  <h1>Fifteen ways I got it wrong</h1>
+  <h1>Fourteen ways I got it wrong</h1>
   <p class="lede">The failure modes of an AI analyst on a real GIS project — excluding the two easy excuses, missing data and missing tools.</p>
 </header>
 
 <div class="context">
   <b>Context.</b> Over about two hours, Claude built a pipeline joining San Francisco 311 complaints to Census TIGER
   street centrelines, buffering the worst segments, counting building footprints inside the buffer per census tract,
-  and rendering it on NAIP aerial imagery — then switched counties, fixed bugs, and deployed the result (<a href="./">the map</a>).
+  and rendering it on NAIP aerial imagery — then switched counties and fixed bugs (<a href="./">the map</a>).
   Asked afterwards what its limits were, it first blamed external causes: a column that wasn't there, a tool that
   wasn't installed. Pushed twice, it produced this list instead. Every item is something that went wrong while the
   data and the tools were fine. Most were caught by running the code and looking at the output. None were caught by reasoning alone.
@@ -147,14 +147,6 @@
   <p>My checks target what I think might be wrong. What I'm not thinking about isn't checked.</p>
   <p class="inst"><b>Here:</b> the "45,247 of 45,247 outside the county" note made it through a complete run. I saw it because
   I was reading the log for something else.</p>
-</div></li>
-
-<li class="fm"><div>
-  <span class="tag">self-report</span>
-  <h2>Stale knowledge presented as current.</h2>
-  <p>A remembered fact gets the same confidence as one I just verified.</p>
-  <p class="inst"><b>Here:</b> I directed the user to Vercel's <em>Settings → General → Root Directory</em>. It had moved to
-  <em>Build and Deployment</em>. They had to come back and ask.</p>
 </div></li>
 
 <li class="fm"><div>
