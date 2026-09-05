@@ -49,7 +49,7 @@ def aoi_bbox_4326(max_tol):
       where try_cast(lat  as double) between  -90 and  90
         and try_cast(long as double) between -180 and 180
         and try_cast(substr(requested_datetime,1,4) as int) = ?
-    """, [ra.METRIC_CRS, ra.p("09_csv/sf_311_2025.csv"), ra.YEAR])
+    """, [ra.METRIC_CRS, ra.p(ra.CASES_CSV), ra.YEAR])
     c.execute("""
       create table hot as
       select r.LINEARID, r.g from (

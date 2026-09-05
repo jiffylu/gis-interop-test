@@ -4,6 +4,8 @@ Overture buildings near 311-hotspot TIGER roads, clipped to San Mateo County.
 
 Pipeline (uses ONLY the data + live endpoints described in README.md):
   09_csv  SF 311 cases 2025      -> snap each case to nearest TIGER road centerline
+                                    (sf_311_2025_full.csv from fetch_311_full.py if present,
+                                     else the shipped 300k-row / Jan-May slice)
   01_shapefile TIGER roads 06081 -> keep segments with > 20 cases  ("hot segments")
                                  -> 200 m buffer (metric, EPSG:26910)
   07_geoparquet Overture bldgs   -> buildings intersecting that buffer
@@ -43,6 +45,14 @@ os.makedirs(OUT, exist_ok=True)
 # ---- analysis parameters -------------------------------------------------
 YEAR              = 2025
 
+# 311 cases. The shipped file is a 300,000-row export cap ending 2025-05-15;
+# fetch_311_full.py pulls all 872k rows for 2025 to the _full file, which is
+# preferred automatically. Override with CASES_CSV=path.
+CASES_CSV = os.environ.get("CASES_CSV") or (
+    "09_csv/sf_311_2025_full.csv"
+    if os.path.exists(os.path.join(ROOT, "09_csv/sf_311_2025_full.csv"))
+    else "09_csv/sf_311_2025.csv")
+
 # Which county's street network the 311 cases are matched against.
 #   06075 San Francisco -- the 311 file's own county. Overture's GeoParquet stops
 #         at lat 37.72 and misses 95% of the cases, so buildings come from the
@@ -53,16 +63,19 @@ YEAR              = 2025
 COUNTY = os.environ.get("COUNTY", "06075")
 PROFILES = {
     "06075": dict(
-        name="San Francisco", fips="06075",
+        name="San Francisco", fips="06075", land_km2=121.4,
         roads="01_shapefile/tl_2024_06075_roads.shp",
         buildings=("vector", "04_geojson/sf_buildings.geojson"),
         bldg_fields=[("mblr", "block-lot"), ("hgt_median_m", "height m")],
         boundary=("tracts", None),
-        # >20 is meaningless here: it selects 1378 segments whose 200 m buffers
-        # cover 91% of the city. See the threshold sweep in the notes.
-        threshold=int(os.environ.get("CASE_THRESHOLD", 1500))),
+        # >20 is meaningless on SF's own network: nearly every segment qualifies
+        # and the buffers blanket the city (live figures are in the map panel).
+        # 1,500 keeps ~30 segments on the shipped Jan-May slice; the full year
+        # has 2.96x the cases, so 4,500 keeps the same selectivity there.
+        threshold=int(os.environ.get("CASE_THRESHOLD",
+                                     4500 if CASES_CSV.endswith("_full.csv") else 1500))),
     "06081": dict(
-        name="San Mateo", fips="06081",
+        name="San Mateo", fips="06081", land_km2=1163.0,
         roads="01_shapefile/tl_2024_06081_roads.shp",
         buildings=("parquet", "07_geoparquet/overture_buildings.parquet"),
         bldg_fields=[("class", "class"), ("height", "height m")],
@@ -87,7 +100,7 @@ COORD_DP          = 6       # ~0.1 m; full float precision triples the HTML size
 CKPT_DB   = os.path.join(OUT, "checkpoint.duckdb")
 CKPT_JSON = os.path.join(OUT, "checkpoint.json")
 CKPT_PARAMS = dict(county=COUNTY, year=YEAR, snap_tol_m=SNAP_TOL_M,
-                   case_threshold=CASE_THRESHOLD, buffer_m=BUFFER_M)
+                   case_threshold=CASE_THRESHOLD, buffer_m=BUFFER_M, cases_csv=CASES_CSV)
 
 def log(*a): print("[%s]" % datetime.now().strftime("%H:%M:%S"), *a, flush=True)
 def p(*a):   return os.path.join(ROOT, *a)
@@ -313,7 +326,7 @@ def probe_all():
             select count(*), min(requested_datetime), max(requested_datetime),
                    count(*) filter (where try_cast(lat as double) is null)
             from read_csv(?, header=true, all_varchar=true, ignore_errors=true)
-        """, [p("09_csv/sf_311_2025.csv")]).fetchone()
+        """, [p(CASES_CSV)]).fetchone()
         return ("%d rows, %s .. %s, %d rows with unusable lat/long; "
                 "no CRS declared -> assumed WGS84/EPSG:4326") % (n, lo[:10], hi[:10], nn)
     probe("09_csv", "SF 311 cases 2025 (CSV, lat/long)", _csv)
@@ -466,7 +479,7 @@ def analyse(county_geojson):
       where try_cast(lat  as double) between  -90 and  90
         and try_cast(long as double) between -180 and 180
         and try_cast(substr(requested_datetime,1,4) as int) = ?
-    """, [p("09_csv/sf_311_2025.csv"), YEAR])
+    """, [p(CASES_CSV), YEAR])
     n_cases = c.execute("select count(*) from cases").fetchone()[0]
 
     # clip candidate cases to the roads' envelope (+1 km) before the metric transform
@@ -514,6 +527,14 @@ def analyse(county_geojson):
             "intersection. Ties are broken on LINEARID so runs are reproducible; a segment "
             "sitting right on the %d-case threshold can still be sensitive to that choice."
             % (n_tied, n_assigned, 100.0 * n_tied / max(n_assigned, 1), CASE_THRESHOLD))
+
+    # How selective is the README's literal ">20 cases" rule on this data? Kept
+    # in stats so the map panel quotes live figures rather than a stale sweep.
+    n_gt20, km2_gt20 = c.execute("""
+      select count(*), coalesce(ST_Area(ST_Union_Agg(ST_Buffer(r.g, ?)))/1e6, 0)
+      from (select LINEARID, count(*) n from assign group by 1) a
+      join roads r using (LINEARID) where a.n > 20
+    """, [BUFFER_M]).fetchone()
 
     c.execute("""
       create table hot as
@@ -642,6 +663,7 @@ def analyse(county_geojson):
     _drop_intermediates(c)
     return c, dict(n_roads=n_roads, n_cases=n_cases, n_near=n_near, n_assigned=n_assigned,
                    n_hot=n_hot, n_bldg=n_bldg, n_bldg_clipped=n_clip,
+                   n_seg_gt20=n_gt20, pct_land_gt20=100.0 * km2_gt20 / PROFILE["land_km2"],
                    zone_bbox_m=list(zb), zone_bbox_ll=list(ll))
 
 
@@ -1041,14 +1063,14 @@ def build_html(c, stats, naip, county_layer_name, tract_rows, dst):
                 '&middot; NAIP 2022 60&nbsp;cm base</p>'
                 % (PROFILE["name"], PROFILE["fips"], county_layer_name))
     info.append("<h2>Rule applied</h2><table class='kv'>"
-                "<tr><td>SF 311 cases, %d</td><td>%s</td></tr>"
+                "<tr><td>SF 311 cases, %d <span style='color:var(--mut)'>(%s)</span></td><td>%s</td></tr>"
                 "<tr><td>snapped to nearest centreline &le;</td><td>%g m</td></tr>"
                 "<tr><td>cases snapped</td><td>%s</td></tr>"
                 "<tr><td>segments with &gt; %d cases</td><td>%s</td></tr>"
                 "<tr><td>buffer</td><td>%g m</td></tr>"
                 "<tr><td>buildings in buffer</td><td>%s</td></tr>"
                 "<tr><td>after county clip</td><td>%s</td></tr>"
-                "</table>" % (YEAR, format(stats["n_cases"], ","), SNAP_TOL_M,
+                "</table>" % (YEAR, os.path.basename(CASES_CSV), format(stats["n_cases"], ","), SNAP_TOL_M,
                               format(stats["n_assigned"], ","), CASE_THRESHOLD,
                               format(stats["n_hot"], ","), BUFFER_M,
                               format(stats["n_bldg"], ","), format(stats["n_bldg_clipped"], ",")))
@@ -1062,12 +1084,13 @@ def build_html(c, stats, naip, county_layer_name, tract_rows, dst):
     else:
         info.append('<div class="warn"><b>Why the threshold is %s, not 20.</b> With SF\'s own '
                     'street network the 311 data is dense: <b>%s of %s cases</b> snap to a '
-                    'centreline, and a &gt;20 rule selects 1,378 segments whose %g m buffers cover '
-                    '91%% of the city &mdash; every building matches, so the map says nothing. '
-                    'Raising the bar to %s cases isolates the genuinely worst-affected streets. '
-                    'Set <code>CASE_THRESHOLD</code> to change it.</div>'
+                    'centreline, and a &gt;20 rule selects %s segments whose %g m buffers cover '
+                    '%.0f%% of the city\'s land &mdash; nearly every building matches, so the map '
+                    'says nothing. Raising the bar to %s cases isolates the genuinely worst-affected '
+                    'streets. Set <code>CASE_THRESHOLD</code> to change it.</div>'
                     % (format(CASE_THRESHOLD, ","), format(stats["n_assigned"], ","),
-                       format(stats["n_cases"], ","), BUFFER_M, format(CASE_THRESHOLD, ",")))
+                       format(stats["n_cases"], ","), format(stats.get("n_seg_gt20", 0), ","),
+                       BUFFER_M, stats.get("pct_land_gt20", 0), format(CASE_THRESHOLD, ",")))
         info.append('<div class="warn"><b>Building source.</b> Overture\'s GeoParquet stops at '
                     'lat 37.72 and misses 95%% of the SF cases, so footprints come from '
                     '<code>04_geojson/sf_buildings.geojson</code> (177,023 features). Outlines are '

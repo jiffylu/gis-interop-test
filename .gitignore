@@ -6,5 +6,6 @@
 !README.md
 !run_analysis.py
 !regen_naip_hrefs.py
+!fetch_311_full.py
 !site/
 !site/**
