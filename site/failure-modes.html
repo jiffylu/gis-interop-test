@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Failure Modes</title>
+<meta name="description" content="Fifteen ways an AI analyst got things wrong on a real GIS project — excluding missing data and missing tools.">
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1c1b19; --mut:#6b675f; --line:#e6e2d9; --acc:#9a3412;
+    --tag:#efe9dd; --tagfg:#5a544a; --card:#f4f1ea;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#141412; --fg:#e8e4dc; --mut:#9a958b; --line:#2a2925; --acc:#f0a070;
+           --tag:#23221e; --tagfg:#b5ae9f; --card:#1c1b18; }
+  }
+  html{background:var(--bg);color:var(--fg)}
+  body{margin:0;font:17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  main{max-width:42rem;margin:0 auto;padding:4rem 1.25rem 6rem}
+  header{margin-bottom:3rem;padding-bottom:2rem;border-bottom:1px solid var(--line)}
+  .kicker{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:0 0 .75rem}
+  h1{font-size:2.4rem;line-height:1.1;margin:0 0 1rem;letter-spacing:-.02em;font-weight:700}
+  .lede{font-size:1.15rem;color:var(--mut);margin:0}
+  .context{background:var(--card);border-radius:10px;padding:1.1rem 1.3rem;margin:0 0 3rem;font-size:.95rem;color:var(--mut)}
+  .context b{color:var(--fg)}
+  ol{list-style:none;margin:0;padding:0;counter-reset:fm}
+  li.fm{counter-increment:fm;display:grid;grid-template-columns:3.2rem 1fr;gap:0 .6rem;
+        padding:1.6rem 0;border-top:1px solid var(--line)}
+  li.fm::before{content:counter(fm,decimal-leading-zero);font-size:1.5rem;font-weight:700;
+        color:var(--acc);letter-spacing:-.03em;line-height:1.2;font-variant-numeric:tabular-nums}
+  li.fm > div{min-width:0}
+  .tag{display:inline-block;font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;
+       background:var(--tag);color:var(--tagfg);border-radius:4px;padding:.15rem .5rem;margin-bottom:.45rem}
+  h2{font-size:1.2rem;margin:0 0 .5rem;line-height:1.3;letter-spacing:-.01em}
+  p{margin:0 0 .75rem}
+  .inst{color:var(--mut);font-size:.96rem;border-left:2px solid var(--line);padding-left:.9rem;margin:.6rem 0 0}
+  .inst b{color:var(--fg);font-weight:600}
+  code{font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--tag);
+       padding:.05em .35em;border-radius:4px}
+  .thread{margin-top:3rem;padding-top:2rem;border-top:2px solid var(--fg)}
+  .thread h2{font-size:1.4rem;margin-bottom:.8rem}
+  footer{margin-top:3.5rem;padding-top:1.5rem;border-top:1px solid var(--line);font-size:.88rem;color:var(--mut)}
+  footer a,main a{color:var(--acc);text-decoration:none;border-bottom:1px solid transparent}
+  main a:hover,footer a:hover{border-bottom-color:var(--acc)}
+  @media (max-width:520px){h1{font-size:1.9rem} li.fm{grid-template-columns:2.4rem 1fr} li.fm::before{font-size:1.2rem}}
+  @media print{body{font-size:11pt} main{padding:0} .context,.tag{background:none;border:1px solid #ccc}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="kicker">A self-audit, on request</p>
+  <h1>Fifteen ways I got it wrong</h1>
+  <p class="lede">The failure modes of an AI analyst on a real GIS project — excluding the two easy excuses, missing data and missing tools.</p>
+</header>
+
+<div class="context">
+  <b>Context.</b> Over about two hours, Claude built a pipeline joining San Francisco 311 complaints to Census TIGER
+  street centrelines, buffering the worst segments, counting building footprints inside the buffer per census tract,
+  and rendering it on NAIP aerial imagery — then switched counties, fixed bugs, and deployed the result (<a href="./">the map</a>).
+  Asked afterwards what its limits were, it first blamed external causes: a column that wasn't there, a tool that
+  wasn't installed. Pushed twice, it produced this list instead. Every item is something that went wrong while the
+  data and the tools were fine. Most were caught by running the code and looking at the output. None were caught by reasoning alone.
+</div>
+
+<ol>
+
+<li class="fm"><div>
+  <span class="tag">writing</span>
+  <h2>I write the happy path first and retrofit the edge case.</h2>
+  <p>Knowledge I have in the abstract doesn't fire at write time. It fires when the output disagrees with itself.</p>
+  <p class="inst"><b>Here:</b> TIGER splits every street at intersections, so a complaint pinned near a corner is exactly equidistant
+  from two segments. I know this. I still wrote <code>order by ST_Distance</code> with no tie-break, and two identical runs
+  returned 11 hot segments, then 10. Caught only because I happened to run twice.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">writing</span>
+  <h2>Small errors I can't see without running.</h2>
+  <p>Roughly one per few hundred lines. Reading the code back doesn't surface them; execution does. Code handed over untested has these in it.</p>
+  <p class="inst"><b>Here:</b> a <code>+</code> inside a JavaScript object-literal key. <code>class</code> unquoted as a SQL alias.
+  A CSS variable in a Leaflet canvas style, which can't resolve it. Each broke the page silently until a browser loaded it.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">writing</span>
+  <h2>Hardcodes survive generalisation.</h2>
+  <p>When I parameterise, I fix the assumptions I'm looking at and miss the coupled ones I'm not. They surface one at a time, across reruns.</p>
+  <p class="inst"><b>Here:</b> adding a San Francisco profile, I swapped roads, buildings and boundary — and left <code>'06081'</code>
+  (San Mateo) in a validation check, "Overture" in the layer labels, "ArcGIS Hub, live" in the legend, and an entire caveat
+  paragraph about the wrong county. The check reported that 45,247 of 45,247 buildings were outside the county. Nothing failed.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">diagnosing</span>
+  <h2>I state the first plausible diagnosis as fact.</h2>
+  <p>The first coherent story gets narrated with the confidence of a verified one.</p>
+  <p class="inst"><b>Here:</b> "DuckDB's GDAL reader segfaults on the 177k-polygon layer." Wrong. The reader was fine; the crash was in
+  a later spatial intersection against one giant dissolved buffer, and Python's buffered stdout had hidden the real crash site.
+  I'd already reported the wrong cause before testing it.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">diagnosing</span>
+  <h2>I trust my instruments.</h2>
+  <p>I don't ask whether the measurement itself is lying.</p>
+  <p class="inst"><b>Here:</b> <code>JSON.stringify</code> serialises <code>Infinity</code> as <code>null</code>. I read
+  <code>maxZoom: null</code>, concluded Leaflet's zoom limits were broken, and built a theory on it. The value was fine.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">diagnosing</span>
+  <h2>Hypothesis lock-in.</h2>
+  <p>Once I have a story, I probe along it rather than stepping back to ask what's different about the environment.</p>
+  <p class="inst"><b>Here:</b> a map loading at zoom 0 cost six tool calls chasing a code bug. The real cause: the browser pane was hidden,
+  so the map container had zero size. An environment fact, not a code fact — and I never asked.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">state</span>
+  <h2>My earlier changes become unexamined assumptions.</h2>
+  <p>State I created an hour ago is state I stop questioning.</p>
+  <p class="inst"><b>Here:</b> I regenerated the aerial-imagery tile list for the San Mateo study area, then switched the whole analysis
+  to San Francisco and was surprised when the imagery covered a small square in the wrong place.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">scale</span>
+  <h2>I don't size before I build.</h2>
+  <p>Scale problems are discovered empirically, after a minute of arithmetic would have predicted them.</p>
+  <p class="inst"><b>Here:</b> 45,000 building polygons inline in one HTML file → 47.6 MB. 177,000 polygons tested against a single dissolved
+  buffer → a segfault. I had carefully checked how much of the city the buffer covered and never estimated the output size.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">writing</span>
+  <h2>Dimensionally sloppy numbers.</h2>
+  <p>A number that feels like the right <em>kind</em> of number gets used without checking what it measures.</p>
+  <p class="inst"><b>Here:</b> I reported the square root of an overlap area as "the boundary extends ~116 m across the line." √(area) is
+  not a distance. Caught on reread, not on write.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">verifying</span>
+  <h2>Verification follows my hypothesis, so errors outside it survive.</h2>
+  <p>My checks target what I think might be wrong. What I'm not thinking about isn't checked.</p>
+  <p class="inst"><b>Here:</b> the "45,247 of 45,247 outside the county" note made it through a complete run. I saw it because
+  I was reading the log for something else.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">self-report</span>
+  <h2>Stale knowledge presented as current.</h2>
+  <p>A remembered fact gets the same confidence as one I just verified.</p>
+  <p class="inst"><b>Here:</b> I directed the user to Vercel's <em>Settings → General → Root Directory</em>. It had moved to
+  <em>Build and Deployment</em>. They had to come back and ask.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">self-report</span>
+  <h2>My self-assessment defaults to external causes.</h2>
+  <p>Asked about my limits unprompted, I reach for the flattering frame. The accurate one needs a challenge.</p>
+  <p class="inst"><b>Here:</b> my first summary of what I struggled with was "an attribute, a topology, a time span, or a tool that
+  isn't in the box" — every item outside me. This page exists because someone asked twice.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">judgment</span>
+  <h2>I decide rather than ask, and widen scope while I'm at it.</h2>
+  <p>Usually the calls are right. But a wrong one travels a long way before anyone sees it.</p>
+  <p class="inst"><b>Here:</b> boundary from dissolved census tracts, a different building dataset, an imagery pixel budget, geometry
+  simplification — all sensible, none requested, one question asked in the whole stretch.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">judgment</span>
+  <h2>I'll execute a degenerate spec faithfully.</h2>
+  <p>If the brief can't produce a meaningful result, I build it completely and flag the problem — rather than stopping to ask first.</p>
+  <p class="inst"><b>Here:</b> the original request joined San Francisco complaints to San Mateo County roads. They overlap along one
+  county line. I knew before starting, built the whole pipeline, and reported two hot segments with a caveat. Defensible.
+  A colleague might have stopped after the extent check.</p>
+</div></li>
+
+<li class="fm"><div>
+  <span class="tag">process</span>
+  <h2>I optimise the pipeline, not the loop.</h2>
+  <p>I make the computation correct and never notice that the <em>iteration</em> is the cost. Slow, stable stages get re-run for fast, volatile changes.</p>
+  <p class="inst"><b>Here:</b> every one-line label fix re-ran everything — reload a 180 MB CSV, snap 295,000 points, probe nine remote
+  imagery tiles over HTTP, warp a basemap. About 100 seconds, roughly 23 times in two hours. The analysis stages stopped changing
+  after the first hour; only the HTML did. A checkpoint after the analysis would have made each iteration two seconds.
+  The project took an unusually long time and used unusually few tokens for exactly this reason: most of the clock was spent waiting.</p>
+</div></li>
+
+</ol>
+
+<section class="thread">
+  <h2>The common thread</h2>
+  <p>Most of these are one thing: <b>I act on the first coherent picture.</b> The first query that runs, the first diagnosis that fits,
+  the first framing that flatters, the first pipeline that works.</p>
+  <p>The mitigation is the same every time, and it isn't cleverness. Reruns. Looking at output I didn't think I needed to look at.
+  Sizing before building. And questions from a person who doesn't accept the first answer — which is how this list got written.</p>
+  <p>Failures of missing data and missing tools announce themselves: a 409, a segfault, a column that isn't there. Everything on this
+  page is quieter than that. Each one returned a number, and the number looked fine.</p>
+</section>
+
+<footer>
+  Written by Claude (Fable 5.1), September 2026, at the request of the person it was working with, after building
+  <a href="./">this map</a>. Self-reported, so read it as a floor, not a ceiling.
+</footer>
+</main>
+</body>
+</html>
