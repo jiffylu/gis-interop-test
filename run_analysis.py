@@ -16,10 +16,21 @@ Pipeline (uses ONLY the data + live endpoints described in README.md):
   -> out/buildings_per_tract.csv
   -> out/dataset_report.json / .md           (open/fail status for every README dataset)
 
+Iteration speed: a full run is ~100 s, almost all of it in stages whose output
+never changes between edits (CSV parse, 295k-point snap, remote NAIP reads).
+analyse() therefore persists its result tables to out/checkpoint.duckdb, and
+
+  python3 run_analysis.py --render-only
+
+rebuilds the HTML, CSV, report and side-car GeoJSONs from that checkpoint in
+about two seconds, without touching the network or the source data. It refuses
+if COUNTY / SNAP_TOL_M / CASE_THRESHOLD differ from the values the checkpoint
+was built with, so a stale checkpoint can never be rendered under new labels.
+
 Deps actually present here: GDAL 3.8.5 CLI, duckdb+spatial, pyarrow, shapely, requests.
 (No geopandas / rasterio / pyproj in this interpreter, so GDAL CLI + DuckDB do the work.)
 """
-import base64, glob, json, os, re, subprocess
+import base64, glob, json, os, re, subprocess, sys
 from datetime import datetime
 
 import duckdb
@@ -73,6 +84,11 @@ NAIP_MAX_MPX      = float(os.environ.get("NAIP_MAX_MPX", 24))  # basemap budget,
 SIMPLIFY_M        = float(os.environ.get("SIMPLIFY_M", 0.5))  # display-only generalisation
 COORD_DP          = 6       # ~0.1 m; full float precision triples the HTML size
 
+CKPT_DB   = os.path.join(OUT, "checkpoint.duckdb")
+CKPT_JSON = os.path.join(OUT, "checkpoint.json")
+CKPT_PARAMS = dict(county=COUNTY, year=YEAR, snap_tol_m=SNAP_TOL_M,
+                   case_threshold=CASE_THRESHOLD, buffer_m=BUFFER_M)
+
 def log(*a): print("[%s]" % datetime.now().strftime("%H:%M:%S"), *a, flush=True)
 def p(*a):   return os.path.join(ROOT, *a)
 
@@ -81,6 +97,27 @@ def run(cmd, **kw):
     if r.returncode != 0:
         raise RuntimeError("cmd failed: %s\n%s" % (" ".join(cmd[:6]), (r.stderr or "")[-1500:]))
     return r.stdout
+
+# ---- external GDAL binaries ------------------------------------------------
+# The analysis itself runs on DuckDB's bundled GDAL, but the NAIP warp, the
+# dataset probe and the building-cache conversion shell out to gdalwarp,
+# gdalinfo and ogr2ogr. If those aren't on PATH the symptom is a map with no
+# imagery and a one-line note -- so find them explicitly and fail loudly.
+GDAL_CANDIDATE_DIRS = [
+    "/Applications/Postgres.app/Contents/Versions/latest/bin",
+    "/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin",
+]
+def _ensure_gdal_on_path():
+    import shutil
+    if shutil.which("gdalinfo") and shutil.which("ogr2ogr"):
+        return
+    for d in GDAL_CANDIDATE_DIRS:
+        if os.path.exists(os.path.join(d, "gdalinfo")):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            return
+    raise SystemExit("GDAL command-line tools (gdalinfo, gdalwarp, ogr2ogr) not found on PATH "
+                     "or in %s. Install GDAL or add its bin directory to PATH." % GDAL_CANDIDATE_DIRS)
+_ensure_gdal_on_path()
 
 # ---- remote COG access ---------------------------------------------------
 GDAL_ENV = dict(os.environ,
@@ -397,7 +434,10 @@ def buildings_metric_source():
 # 2.  The spatial analysis, in DuckDB spatial (metric CRS EPSG:26910)
 # =========================================================================
 def analyse(county_geojson):
-    c = duckdb.connect()
+    # File-backed so the result tables outlive this process (see --render-only).
+    for f in (CKPT_DB, CKPT_DB + ".wal"):
+        if os.path.exists(f): os.remove(f)
+    c = duckdb.connect(CKPT_DB)
     c.execute("INSTALL spatial; LOAD spatial;")
     c.execute("SET preserve_insertion_order=false;")
 
@@ -488,6 +528,7 @@ def analyse(county_geojson):
         (n_roads, n_cases, n_near, SNAP_TOL_M, n_assigned, CASE_THRESHOLD, n_hot))
 
     if n_hot == 0:
+        _drop_intermediates(c)
         return c, dict(n_roads=n_roads, n_cases=n_cases, n_near=n_near,
                        n_assigned=n_assigned, n_hot=0, n_bldg=0, n_bldg_clipped=0)
 
@@ -598,9 +639,55 @@ def analyse(county_geojson):
                 (stray, n_clip, PROFILE["fips"], (overlap_m2[0] if overlap_m2 else 0) / 1e4))
         log(note); REPORT_NOTE.append(note)
 
+    _drop_intermediates(c)
     return c, dict(n_roads=n_roads, n_cases=n_cases, n_near=n_near, n_assigned=n_assigned,
                    n_hot=n_hot, n_bldg=n_bldg, n_bldg_clipped=n_clip,
-                   zone_bbox_m=zb, zone_bbox_ll=ll)
+                   zone_bbox_m=list(zb), zone_bbox_ll=list(ll))
+
+
+def _drop_intermediates(c):
+    """Only what the renderers read stays in the checkpoint: county, hot, zone,
+    bldg_clip, tracts, tract_counts. The 177k-row building table and the
+    295k-row case tables are rebuilt on the next full run anyway."""
+    for t in ("cases", "cases_m", "assign", "roads", "bldg_all", "bldg", "tracts_bbox"):
+        c.execute("drop table if exists %s" % t)
+
+
+# =========================================================================
+# 2b. Checkpoint -- lets every later edit skip the ~100 s of stable stages
+# =========================================================================
+def save_checkpoint(c, stats, naip, county_layer):
+    meta = dict(params=CKPT_PARAMS, saved=datetime.now().isoformat(timespec="seconds"),
+                stats=stats, county_layer=county_layer,
+                naip=({k: v for k, v in naip.items() if k != "data_uri"} if naip else None),
+                report=REPORT, notes=REPORT_NOTE)
+    json.dump(meta, open(CKPT_JSON, "w"), indent=1)
+    c.execute("CHECKPOINT")
+    log("checkpoint saved -> %s (%.1f MB) + %s" % (
+        os.path.basename(CKPT_DB), os.path.getsize(CKPT_DB) / 1e6, os.path.basename(CKPT_JSON)))
+
+
+def load_checkpoint():
+    if not (os.path.exists(CKPT_DB) and os.path.exists(CKPT_JSON)):
+        raise SystemExit("--render-only: no checkpoint in %s; run once without the flag first" % OUT)
+    meta = json.load(open(CKPT_JSON))
+    if meta["params"] != CKPT_PARAMS:
+        diff = ["%s: checkpoint=%r now=%r" % (k, meta["params"].get(k), CKPT_PARAMS[k])
+                for k in CKPT_PARAMS if meta["params"].get(k) != CKPT_PARAMS[k]]
+        raise SystemExit("--render-only: checkpoint was built with different parameters "
+                         "(%s). Run the full pipeline instead." % "; ".join(diff))
+    log("=== rendering from checkpoint saved %s ===" % meta["saved"])
+    c = duckdb.connect(CKPT_DB)
+    c.execute("INSTALL spatial; LOAD spatial;")
+    REPORT[:] = meta["report"]
+    REPORT_NOTE[:] = meta["notes"]
+    naip = meta["naip"]
+    if naip:
+        jpg = os.path.join(OUT, "naip_aoi.jpg")
+        if not os.path.exists(jpg):
+            raise SystemExit("--render-only: checkpoint expects %s but it is missing" % jpg)
+        naip["data_uri"] = "data:image/jpeg;base64," + base64.b64encode(open(jpg, "rb").read()).decode()
+    return c, meta["stats"], naip, meta["county_layer"]
 
 
 # =========================================================================
@@ -931,15 +1018,15 @@ new ResizeObserver(fit).observe(document.getElementById('map'));
 """
 
 def build_html(c, stats, naip, county_layer_name, tract_rows, dst):
-    hot = gj(c, "select LINEARID, FULLNAME, MTFCC, RTTYP, n_cases, %s from hot" % to4326()) \
+    hot = gj(c, "select LINEARID, FULLNAME, MTFCC, RTTYP, n_cases, %s from hot order by LINEARID" % to4326()) \
           if stats["n_hot"] else {"type": "FeatureCollection", "features": []}
     zone = gj(c, "select 1 as i, %s from zone" % to4326()) \
           if stats["n_hot"] else {"type": "FeatureCollection", "features": []}
-    bl = gj(c, "select id, height, num_floors, class, subtype, %s from bldg_clip"
+    bl = gj(c, "select id, height, num_floors, class, subtype, %s from bldg_clip order by id, ST_XMin(g), ST_YMin(g)"
                 % to4326(simplify=True)) \
           if stats["n_hot"] else {"type": "FeatureCollection", "features": []}
     tr = gj(c, """select t.GEOID, t.STATEFP, t.COUNTYFP, t.NAMELSAD, tc.n_buildings, %s
-                  from tracts t join tract_counts tc using (GEOID)""" % to4326("t.g")) \
+                  from tracts t join tract_counts tc using (GEOID) order by t.GEOID""" % to4326("t.g")) \
           if stats["n_hot"] else {"type": "FeatureCollection", "features": []}
     county = json.load(open(os.path.join(OUT, "county_boundary.geojson")))
 
@@ -1024,40 +1111,47 @@ def build_html(c, stats, naip, county_layer_name, tract_rows, dst):
             .replace("__TITLE__", "Buildings near 311-hotspot roads")
             .replace("__INFO__", "".join(info))
             .replace("__LEGEND__", legend)
-            .replace("__DATA__", json.dumps(data)))
+            .replace("__DATA__", json.dumps(data, sort_keys=True)))   # canonical: byte-identical regardless of dict build order
     open(dst, "w").write(html)
     log("wrote %s (%.1f MB)" % (os.path.basename(dst), os.path.getsize(dst)/1e6))
     return dst
 
 
 def main():
-    probe_all()
-    county_gj, county_layer = fetch_county_boundary()
-    c, stats = analyse(county_gj)
+    render_only = "--render-only" in sys.argv
+    if render_only:
+        c, stats, naip, county_layer = load_checkpoint()
+    else:
+        probe_all()
+        county_gj, county_layer = fetch_county_boundary()
+        c, stats = analyse(county_gj)
+        naip = None
+        if stats["n_hot"]:
+            try:
+                naip = naip_overlay(c, stats["zone_bbox_m"])
+            except Exception as e:
+                log("NAIP overlay FAILED: %s" % e)
+                REPORT_NOTE.append("NAIP overlay failed: %s" % e)
+                stats["naip_failed"] = str(e)[:200]
+        save_checkpoint(c, stats, naip, county_layer)
+
+    # -- everything below is cheap and reads only the checkpointed tables --
     if stats["n_hot"]:
         csv_path, tract_rows = write_tract_csv(c)
     else:
         log("no road segment exceeded the case threshold; skipping tract CSV")
         csv_path, tract_rows = None, []
-    naip = None
-    if stats["n_hot"]:
-        try:
-            naip = naip_overlay(c, stats["zone_bbox_m"])
-        except Exception as e:
-            log("NAIP overlay FAILED: %s" % e)
-            REPORT_NOTE.append("NAIP overlay failed: %s" % e)
     write_report()
     html = build_html(c, stats, naip, county_layer, tract_rows,
                       os.path.join(OUT, "buildings_near_311_hot_roads.html"))
-    # side-car GeoJSONs for reuse
     if stats["n_hot"]:
         for name, sql in [
-            ("hot_road_segments", "select LINEARID, FULLNAME, MTFCC, n_cases, %s from hot" % to4326()),
+            ("hot_road_segments", "select LINEARID, FULLNAME, MTFCC, n_cases, %s from hot order by LINEARID" % to4326()),
             ("buffer_200m",       "select 1 as i, %s from zone" % to4326()),
-            ("matching_buildings","select id, height, num_floors, class, subtype, %s from bldg_clip" % to4326()),   # full precision on disk
+            ("matching_buildings","select id, height, num_floors, class, subtype, %s from bldg_clip order by id, ST_XMin(g), ST_YMin(g)" % to4326()),   # full precision on disk
         ]:
-            json.dump(gj(c, sql), open(os.path.join(OUT, name + ".geojson"), "w"))
-    log("=== done ===")
+            json.dump(gj(c, sql), open(os.path.join(OUT, name + ".geojson"), "w"), sort_keys=True)
+    log("=== done%s ===" % (" (render-only)" if render_only else ""))
     print(json.dumps({k: v for k, v in stats.items() if not k.startswith("zone_")}, indent=2))
     return html
 
