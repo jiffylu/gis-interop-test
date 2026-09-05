@@ -1,0 +1,10 @@
+# Allowlist: this folder holds ~1.8 GB of source data (GitHub rejects files over
+# 100 MB and Vercel doesn't need any of it). Only the code and the deployable
+# site/ folder are tracked. Data stays local; run_analysis.py regenerates site/.
+*
+!.gitignore
+!README.md
+!run_analysis.py
+!regen_naip_hrefs.py
+!site/
+!site/**
