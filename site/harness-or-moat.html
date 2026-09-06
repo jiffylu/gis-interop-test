@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Harness or Moat</title>
+<meta name="description" content="A record of an exchange about whether an AI GIS startup's architecture is a durable advantage — the founder's case, Claude's assessment, how domain encoding is actually built, and who holds the data.">
+<style>
+  :root{ --bg:#fbfaf7; --fg:#1c1b19; --mut:#6b675f; --line:#e6e2d9; --acc:#9a3412;
+         --tag:#efe9dd; --tagfg:#5a544a; --card:#f4f1ea; --quote:#f7f3ea; }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#141412; --fg:#e8e4dc; --mut:#9a958b; --line:#2a2925; --acc:#f0a070;
+           --tag:#23221e; --tagfg:#b5ae9f; --card:#1c1b18; --quote:#1a1917; } }
+  html{background:var(--bg);color:var(--fg)}
+  body{margin:0;font:17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  main{max-width:44rem;margin:0 auto;padding:4rem 1.25rem 6rem}
+  header{margin-bottom:2.5rem;padding-bottom:2rem;border-bottom:1px solid var(--line)}
+  .kicker{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:0 0 .75rem}
+  h1{font-size:2.4rem;line-height:1.1;margin:0 0 1rem;letter-spacing:-.02em}
+  .lede{font-size:1.15rem;color:var(--mut);margin:0}
+  .context{background:var(--card);border-radius:10px;padding:1.1rem 1.3rem;margin:0 0 2rem;font-size:.95rem;color:var(--mut)}
+  .context b{color:var(--fg)}
+  nav.toc{margin:0 0 3rem;font-size:.95rem}
+  nav.toc ol{margin:.4rem 0 0;padding-left:1.4rem}
+  nav.toc li{margin:.25rem 0}
+  section{margin-top:3.5rem;padding-top:2rem;border-top:2px solid var(--fg)}
+  section > .who{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--acc);margin:0 0 .4rem}
+  h2{font-size:1.6rem;line-height:1.2;margin:0 0 1.2rem;letter-spacing:-.015em}
+  h3{font-size:1.15rem;margin:1.8rem 0 .6rem}
+  h4{font-size:1rem;margin:1.2rem 0 .4rem}
+  p{margin:0 0 .9rem}
+  ul,ol{margin:0 0 1rem;padding-left:1.4rem}
+  li{margin:.3rem 0}
+  blockquote{margin:1rem 0 1.4rem;padding:1rem 1.3rem;background:var(--quote);border-left:3px solid var(--acc);border-radius:0 8px 8px 0;font-size:.97rem}
+  blockquote p:last-child{margin-bottom:0}
+  .q{font-style:italic;color:var(--mut);margin:0 0 1rem;padding-left:.9rem;border-left:2px solid var(--line)}
+  table{width:100%;border-collapse:collapse;margin:.8rem 0 1.4rem;font-size:.93rem}
+  th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .wrap{overflow-x:auto}
+  code{font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--tag);padding:.05em .35em;border-radius:4px}
+  pre{background:var(--tag);border-radius:8px;padding:1rem 1.1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  pre code{background:none;padding:0}
+  .callout{background:var(--card);border-radius:8px;padding:.9rem 1.1rem;margin:1rem 0 1.4rem}
+  a{color:var(--acc);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--acc)}
+  footer{margin-top:3.5rem;padding-top:1.5rem;border-top:1px solid var(--line);font-size:.88rem;color:var(--mut)}
+  .sources{font-size:.82rem;color:var(--mut)}
+  @media (max-width:520px){h1{font-size:1.9rem} h2{font-size:1.35rem}}
+  @media print{main{padding:0} .context,.callout,pre,blockquote{border:1px solid #ccc;background:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="kicker">Conversation record</p>
+  <h1>Harness or Moat</h1>
+  <p class="lede">A startup founder explained why an AI GIS platform beats ad-hoc analysis in a model. This is that case, an assessment of it against a real project, and the two questions that followed: how domain encoding is actually built, and whether it stays an advantage.</p>
+</header>
+
+<div class="context">
+  <b>Context.</b> Over a few hours, Claude built a pipeline joining San Francisco 311 complaints to Census TIGER street centrelines,
+  buffering the worst segments, counting building footprints inside per census tract, and rendering it on NAIP imagery
+  (<a href="./">the map</a>). It then wrote up <a href="./failure-modes.html">fourteen ways it got things wrong</a> along the way.
+  Jeff mentioned to a startup founder that a lot of this could be done inside Claude. The founder replied with the message below.
+  Everything after it is Claude's, written in the conversation and reproduced here with the substance intact.
+</div>
+
+<nav class="toc">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#founder">The founder's case</a></li>
+    <li><a href="#assessment">What Claude thinks of it</a></li>
+    <li><a href="#encoding">How domain encoding is actually done</a></li>
+    <li><a href="#moat">Is it only a moat because there's no training data?</a></li>
+    <li><a href="#data">Besides Esri, who holds the data?</a></li>
+  </ol>
+</nav>
+
+<section id="founder">
+  <p class="who">The founder</p>
+  <h2>The case for a platform</h2>
+  <p class="q">Jeff: There's a startup that wants to build an AI GIS tool — I flagged that I was able to do a lot of queries inside Claude. This was the response. What do you think?</p>
+  <blockquote>
+    <p>Firstly, our agents call spatial tools, they don't write fresh geometry operations for every workflow. If you ask a model for right-of-way area, it buffers every conductor span and sums the results. That answer is wrong for exactly the reason yours was, overlapping spans are counted twice (though the result looks reasonable). Our agents can't do that. They call a rigid/algorithmic tool that dissolves before it measures, and that tool performs identically on every call. Same for reprojection, geodesic vs. planar length, and buffer end-cap and join behavior: these are fixed by the platform, not re-decided per run.</p>
+    <p>Related, and important at enterprise scale, is that spatial computation runs server-side on the data, returning only a summary to the agent. You can't pass a statewide LiDAR collection or a 200,000-span network through a context window. It also means the customer's data never leaves their boundary, which customers in insurance, energy, defense, etc. care about a lot.</p>
+    <p>Secondly, we perform physical plausibility and conservation checks before returning any answer. This data represents the physical world, so it must meet physical rules. We validate results against invariants:</p>
+    <ul>
+      <li>Conservation… per-tract lengths sum to the study-area total, child areas never exceed the parent polygon, shares sum to 100%. This is what would have caught your error.</li>
+      <li>Physical plausibility… negative clearances, 400 ft tall trees, slopes past vertical, structures in open water.</li>
+      <li>Unit and datum… values implying a feet/meters swap (3.28×) or geoid separation between NAVD88 and ellipsoid heights (tens of meters).</li>
+    </ul>
+    <p>Thirdly, we manage dataset selection, which is upstream of the error you had. The failure sometimes worse than bad computation is a good computation on the wrong input. If you ask a model to measure road length, it uses TIGER/Line because it's familiar and free, but TIGER is generalized cartographic geometry, not survey-grade, so every mile you report is systematically inaccurate. A model's knowledge of dataset characteristics is stale training recall. We maintain a catalog of public domain geospatial repositories with resolution, vintage, positional accuracy, lineage, and licensing encoded, so selection is a queryable step and, more usefully, an inspectable one. Our platform can tell you it used X over Y data set and why.</p>
+    <p>Finally, we also enforce contracts at each agent handoff (output type, shape, and cardinality) so a step can't subtly truncate or malform and allow the next step to run on bad data anyway.</p>
+    <p>Example workflows where you'd see a difference: <b>Right-of-way area across a service territory</b> — buffer every span, sum the areas; it unknowingly double-counts every overlap, and the error worsens with network density. We dissolve before measuring, and a conservation check confirms the total can't exceed the corridor width. <b>Bid takeoff from an RFP package</b> — a File Geodatabase of circuits, CAD substation drawings, scanned PDF maps, and a shapefile with no .prj. A model guesses the CRS on that last one and returns mileage that's confidently a few percent off; ask it twice and you get two numbers. We resolve CRS from the catalog and refuse to proceed on an unresolvable one, then reconcile trim miles against known circuit-length totals. On a several-hundred-million-dollar bid, this is a big deal. <b>Tree-to-conductor clearance from LiDAR</b> — mixing feet and meters, or NAVD88 against ellipsoid heights, produces clearance values that are plausible but wrong by 3.28× or tens of meters. Nothing in the output looks unusual. Our datum and unit sanity-checks catch the mismatch and plausibility bounds reject the result before it reaches the user.</p>
+  </blockquote>
+</section>
+
+<section id="assessment">
+  <p class="who">Claude</p>
+  <h2>Sound engineering, wrong diagnosis</h2>
+  <p>He's describing sound engineering, and most of it maps directly onto the failure list I wrote. But his critique of <em>this</em> run is a pitch template aimed at a generic LLM, not a diagnosis of what actually happened — and the difference matters for how you read the rest.</p>
+
+  <h3>Where he's right, specifically</h3>
+  <p><b>Invariant checks.</b> His strongest point, and it lands squarely on my failure modes 10 and the two vacuous verifications. My checks were hypothesis-directed and improvised per run. Conservation and plausibility checks are hypothesis-<em>independent</em> — they catch what you weren't looking for. I ran some (tract counts sum to total, original ids all present, run-to-run hash equality, the boundary-disagreement count), but as one-offs. Making them a standing contract is better engineering. No argument.</p>
+  <p><b>Handoff contracts.</b> The hardcoded-FIPS bug, the silently-missing NAIP basemap, the stale checkpoint — a typed contract on county, a "basemap present" assertion, and the parameter guard I eventually built would each have caught one. He builds those structurally; I built them reactively, after each bit me.</p>
+  <p><b>Data stays server-side.</b> Correct and important for his customers. Also what happened here — DuckDB, GDAL and PostGIS ran on the local machine; 177k footprints and 872k cases never entered a context window, which is why token usage was low. His "200,000 spans through a context window" is a straw man of how I worked, but a real point against naive LLM use.</p>
+  <p><b>"Ask twice, get two numbers."</b> Literally true of my first 100 m run — 11 segments, then 10 — until the tie-break fix. Fair hit.</p>
+
+  <h3>Where he's wrong about this run</h3>
+  <p><b>The double-counting claim.</b> He says my answer was wrong because overlapping buffers were summed twice. It wasn't. The buffer areas came from <code>ST_Union_Agg(ST_Buffer(…))</code> — dissolve, then measure, exactly what he says his tool does — and building membership used <code>EXISTS … ST_DWithin</code>, which is set semantics: a building counts once no matter how many hot segments it's near. He diagnosed an error he assumed a model would make, without seeing the code. The errors I <em>did</em> make were less photogenic — a missing <code>ORDER BY</code>, a FIPS that survived a refactor, a shell variable zsh didn't word-split.</p>
+  <p><b>"Fresh geometry operations."</b> I didn't hand-roll a buffer. I called GEOS via DuckDB, PROJ for reprojection, GDAL for the warp — the same rigid primitives his platform wraps. Every failure was in <em>composition</em>: order of operations, bookkeeping, parameter tracking. A rigid dissolve tool doesn't stop you feeding it the wrong county. His architecture addresses composition partially (contracts) and not at all for the class that dominated this project.</p>
+  <p><b>"Stale training recall" for dataset selection.</b> The selection findings were empirical: extents printed, date ranges counted, columns diffed, the 300k export cap discovered by asking the live source. TIGER was used because the README supplied it and the brief said "only what's described." The one genuinely stale-recall failure was a hosting dashboard's settings location — a UI fact, not a dataset one.</p>
+  <p><b>TIGER accuracy.</b> True that it's generalized cartography, roughly ±7 m, not survey-grade. Irrelevant to "which buildings are within 200 m of a complaint-heavy street," where a few metres against a 200 m buffer changes nothing. Devastating for a mileage takeoff on a nine-figure bid. Fitness-for-purpose is the right frame; "systematically inaccurate" is true for his use and empty for this one.</p>
+
+  <h3>What his framing misses</h3>
+  <p>A catalog encodes vintage, resolution, accuracy, lineage. None of those would have flagged the 300k-row export cap — the file's metadata was fine; its <em>content</em> was truncated. That took an empirical count against the source. Catalogs describe datasets as published; they don't audit the copy you were handed.</p>
+  <p>And invariants can reject true results. The 11 buildings that survived the county clip yet sat in San Francisco tracts weren't a computation error — two authoritative sources draw the same boundary differently. A rigid "child never exceeds parent" check either fails that run or needs an exception path, and the exception path is where the judgment he's trying to eliminate comes back in.</p>
+
+  <h3>Questions I'd put to him</h3>
+  <ul>
+    <li>Does your nearest-feature tool break ties deterministically? Street networks split at every intersection; 13.5% of cases here were exact ties. "Performs identically on every call" is a property of the whole pipeline, and mine broke outside any primitive.</li>
+    <li>What happens when the catalog doesn't have the dataset, or has it but the customer's copy is truncated?</li>
+    <li>When a conservation check fails because two sources genuinely disagree, what's the path — refuse, flag, or pick a source? Who decides?</li>
+    <li>"Refuse rather than guess" on a missing <code>.prj</code> is right for a bid. Is it a policy setting or hardwired? The 311 CSV declared no CRS; the correct move for an exploratory map was to assume WGS84 and say so.</li>
+  </ul>
+
+  <h3>The honest read</h3>
+  <p>Two different products. What Jeff watched is an <em>analyst</em> workflow: fast, broad, verifiable with a human in the loop — and it found the county mismatch, the export cap, and the misplaced imagery tiles, none of which a dissolve tool catches, because they're upstream of computation. What he's selling is a <em>production</em> workflow for unattended, high-stakes answers in one vertical, where a wrong number costs real money and nobody re-runs it to check.</p>
+  <p>His moat isn't "agents call tools" — that's a design pattern anyone can copy on PostGIS. It's the domain encoding: utility network invariants, conductor-clearance datum checks, a curated catalog with accuracy and licensing. That's laborious, vertical, and genuinely valuable. If I were evaluating the company, that's the part I'd ask to see.</p>
+</section>
+
+<section id="encoding">
+  <p class="who">Claude</p>
+  <h2>How domain encoding is actually done</h2>
+  <p class="q">Jeff: How would one go about doing domain encoding?</p>
+  <p>"Domain encoding" is turning what an expert <em>knows</em> into things a system <em>checks</em> and <em>does the same way every time</em>. In practice it's six artifacts.</p>
+
+  <h3>The six artifacts</h3>
+  <p><b>1. A fixed vocabulary of operations.</b> Not "buffer" — <em>corridor area</em>, defined as dissolve-then-measure, planar in a projected CRS, round end-caps, one tested function. Not "nearest" — <em>snap to segment</em>, with a documented tie-break. The domain's questions become compositions of maybe 20–40 named operations, each with a contract and a test. The model composes; it never implements. The tie-break fix would have been made once, in the library, and never rediscovered.</p>
+  <p><b>2. Invariants.</b> Rules the physical world imposes, run on every output regardless of what anyone suspects. <em>Conservation</em> — per-tract counts sum to the total; a clipped footprint never exceeds its parent. <em>Plausibility</em> — no negative clearances, no 400 ft trees, no building count above the footprint layer's total. <em>Consistency</em> — units and datums agree; a 3.28× or tens-of-metres discrepancy is a swap, not a finding. Each carries a severity: <b>hard fail</b> or <b>warn and annotate</b>. That distinction is the part people skip. The 11 buildings in the wrong county's tracts weren't an error; a hard-fail invariant there rejects a true answer.</p>
+  <p><b>3. A catalog built by profiling, not by reading.</b> Vintage, resolution, accuracy, lineage, licence, CRS, extent — and <em>fitness tags</em>: TIGER is fit for proximity at ≥50 m, unfit for mileage. Crucially, it must also hold <em>content checks</em> run against the copy you actually have: row count versus source, date range versus claimed period, null-coordinate rate. Published metadata described the 311 file perfectly; only a count against DataSF revealed the export cap.</p>
+  <p><b>4. Contracts at every boundary.</b> Every geometry carries its CRS as data, not a comment. Every measure carries a unit. Every table carries expected cardinality. The receiving step refuses if they're missing or wrong. The checkpoint guard — refuse to render if county, tolerance, threshold or cases file differ from what was saved — is one contract, built after being bitten.</p>
+  <p><b>5. Policies for the judgment calls.</b> Missing <code>.prj</code> → refuse or assume? Sources disagree → which wins? Threshold → fixed or scaled to volume? Write them as configuration with defaults per <em>use-case class</em>. For an exploratory map, "assume WGS84 and flag it" is right. For a bid, "refuse" is right. Same operation, different policy, inspectable rather than re-decided by whoever's running it.</p>
+  <p><b>6. A failure corpus.</b> Every past error becomes a regression test: <em>tie at intersection</em>, <em>county mismatch</em>, <em>export cap</em>, <em>imagery tiles outside AOI</em>, <em>PATH without GDAL</em>. The fourteen-item page is the seed of one. This is how domain knowledge actually accumulates — not from experts writing rules up front, but from failures turned into checks that never fire again.</p>
+
+  <h3>The process</h3>
+  <ol>
+    <li><b>Start from the questions, not the data.</b> Enumerate the top twenty workflows the domain runs. Each becomes a playbook.</li>
+    <li><b>Walk each with an expert and write the correct procedure.</b> Mark every operation, every invariant that should hold at the end, every judgment call. Experts don't volunteer invariants; you extract them by asking "what would make you distrust this number?"</li>
+    <li><b>Build the operations as a tested library.</b> Small, boring, fixed semantics. This is where "performs identically on every call" actually comes from.</li>
+    <li><b>Profile every dataset empirically</b> before it enters the catalog — extent, dates, counts, columns, CRS — made permanent and versioned.</li>
+    <li><b>Run the playbooks. Every failure becomes a test and usually an invariant.</b> The encoding is the residue of failures, reviewed by someone who knows the domain.</li>
+    <li><b>Put the model at the composition layer only.</b> It picks datasets from the catalog and must cite why, composes named operations, and its output passes through the invariants before anyone sees it.</li>
+  </ol>
+
+  <h3>What it would look like for the 311 workflow</h3>
+<pre><code>workflow: buildings_near_complaint_hotspots
+inputs:
+  cases:      {catalog: sf_311, checks: [row_count_vs_source, date_range_covers: 2025, coord_null_rate &lt; 2%]}
+  streets:    {catalog: tiger_roads, fit_for: proximity, county_must_match: cases}
+  footprints: {catalog: sf_buildings, extent_must_cover: cases}
+steps:
+  - snap_to_segment(cases, streets, tolerance: 50m, tie_break: linearid)
+  - hot  = threshold(counts, policy: scale_to_volume, base: 1500 per 295k)
+  - zone = corridor(hot, width: 200m)            # dissolves before measuring
+  - hits = count_within(footprints, zone)        # set semantics
+  - clip(hits, boundary: dissolved_tracts)
+  - rollup(hits, tracts)
+invariants:
+  - sum(rollup) == count(hits)                    # hard
+  - hits &lt;= count(footprints)                     # hard
+  - hits_outside_county_tracts == 0               # warn, annotate with source disagreement
+  - imagery_covers(zone)                          # hard
+  - rerun_hash_equal                              # hard
+provenance: [datasets_used_and_why, parameters, invariants_passed, warnings]</code></pre>
+  <p>Every line of that is something the project either did by hand, did too late, or should have done. The encoding isn't invented; it's harvested from exactly this kind of run.</p>
+
+  <h3>The pitfalls</h3>
+  <ul>
+    <li><b>Rigidity.</b> Encode severities, not just rules, or the system rejects true answers and the exception path reintroduces the judgment you removed.</li>
+    <li><b>Catalog ≠ audit.</b> Metadata is what the publisher said. Checks are what's in the file.</li>
+    <li><b>It's never finished.</b> The failure corpus grows forever. A team that thinks the encoding is "done" has stopped looking.</li>
+    <li><b>It's vertical and expensive.</b> Utilities need conductor-clearance datums; insurers need parcel-to-structure matching; defence needs something else. None of it transfers. That's why it's a moat, and why "AI GIS tool" as a horizontal pitch is weaker than "AI for utility right-of-way" as a vertical one.</li>
+  </ul>
+</section>
+
+<section id="moat">
+  <p class="who">Claude</p>
+  <h2>Is it only a moat because there's no training data?</h2>
+  <p class="q">Jeff: This seems like a GIS harness and would only stay a competitive differentiation if there's little training data for model companies to gather from. Is that true?</p>
+  <p>Partly true, but training data is the wrong axis to judge it on. "GIS harness" is the right label — and a harness has three layers that age very differently.</p>
+
+  <h3>Three layers, three fates</h3>
+  <p><b>Knowledge</b> — dissolve before measuring, TIGER is generalized, NAVD88 isn't ellipsoid height. This is in GDAL docs, PostGIS docs, USGS standards, textbooks. Models already have it; they'll have more. The premise that a model "re-decides" these per run out of ignorance is already mostly false. <b>This layer commoditizes, and "little training data" barely applies.</b></p>
+  <p><b>Guarantees</b> — invariants that run whether or not the model thought to check, deterministic tools, typed contracts, provenance. These aren't knowledge; they're <em>enforcement</em>. Look at what actually went wrong: I knew about intersection ties and still omitted the tie-break. I knew the FIPS mattered and still let it survive a refactor. Twice my verification passed vacuously. None were gaps a training corpus fills; they're what a single-pass generator does under execution, and the fix is structural. A surgeon doesn't stop using the checklist because she got better — the checklist works <em>because</em> failure is about consistency, not competence. <b>This layer doesn't erode with training. It's also not a moat, because it's a design pattern anyone can build.</b></p>
+  <p><b>Private assets</b> — the profiled catalog of <em>this customer's</em> datasets and copies, the failure corpus built from real runs, reconciliation data like known circuit-length totals, the invariants that only exist because a specific customer got burned a specific way. Labs can't train on data behind a utility's firewall, and can't train on failures that haven't happened yet. <b>This is where "little training data" is genuinely true — and it's the only layer that's actually a moat.</b></p>
+
+  <h3>The real risk</h3>
+  <p>Not that models learn GIS. That a model lab or Esri ships a <em>general</em> verification harness — typed tool contracts, invariant frameworks, deterministic primitives, provenance — and it becomes table stakes. At that point the startup's harness is undifferentiated and only the private-asset layer separates them from a smart model plus a generic harness.</p>
+  <p>Which makes the founder's message a yellow flag. Roughly eighty percent describes the harness architecture, twenty percent the vertical. And every architectural point can be reconstructed in conversation from public knowledge — which means a lab can build it. What can't be reconstructed is a utility's accumulated failure corpus, or which of their datasets are truncated copies.</p>
+
+  <h3>What it will actually come down to</h3>
+  <p>A cheaper, better model plus a generic harness gets you to "usually right, inspectable." Regulated, nine-figure decisions require "right, guaranteed, and someone accountable." That last part is a vertical-SaaS moat, not an AI moat: integration into FGDB-plus-CAD-plus-scanned-PDF workflows, the vendor of record an engineer signs off on, liability positioning, customer-specific reconciliation. Unglamorous and durable. The harness is the delivery mechanism, not the product.</p>
+  <p>A second-order effect: a good harness lets you run a cheaper model and swap labs freely. A margin and independence story, not a differentiation story — but for a startup, not nothing.</p>
+
+  <h3>Questions that separate the moat from the pitch</h3>
+  <ul>
+    <li>What fraction of your invariant library is public physics versus rules learned from a customer failure? The second number is the moat.</li>
+    <li>How many customer datasets have you <em>profiled</em> — not catalogued from metadata, profiled against source?</li>
+    <li>Do you hold reconciliation data — circuit totals, asset registries — under agreement?</li>
+    <li>If a lab shipped typed geo-tools and a conservation-check framework tomorrow, what's left?</li>
+  </ul>
+  <div class="callout">If the answers are "mostly physics," "a few," "not yet," and a pause — they've built the commoditizable layer and are calling it the company. If they have real numbers, the harness is scaffolding around something worth owning.</div>
+  <p><b>Bottom line.</b> "Little training data" protects the knowledge layer, which was never the valuable part. The guarantee layer survives smarter models but isn't defensible. The private layer is defensible and doesn't depend on model progress at all — it depends on customers, failures, and time. That's what to underwrite.</p>
+</section>
+
+<section id="data">
+  <p class="who">Claude</p>
+  <h2>Besides Esri, who holds the data?</h2>
+  <p class="q">Jeff: Besides Esri — what other companies have this data and what % market share do they have?</p>
+  <div class="callout"><b>A warning about the numbers.</b> There is no reliable public market-share dataset for GIS. Esri is private and reports nothing. What circulates comes from analyst-report press releases that contradict each other — one says Esri holds "over 9%," another "35–40%," and the top five collectively hold either 27% or 60% depending on the report. Every percentage below is an order-of-magnitude estimate. Searching was still worth it: one blog claimed Smallworld is "now part of Hexagon," which is wrong — GE Vernova still owns it.</div>
+  <p>"This data" is really three different things held by three different sets of companies.</p>
+
+  <h3>1. Platforms — where customers' GIS data lives</h3>
+  <div class="wrap"><table>
+    <tr><th>Company</th><th>What they hold</th><th>Share</th></tr>
+    <tr><td><b>Esri</b> (ArcGIS)</td><td>System of record for most governments and large enterprises</td><td>~35–40% of GIS software revenue by the most-cited estimate; clear majority of seats</td></tr>
+    <tr><td><b>Hexagon</b></td><td>Utilities, public safety, defence, mining (Intergraph heritage, GeoMedia, NetWorks)</td><td>Second tier</td></tr>
+    <tr><td><b>Bentley</b></td><td>Infrastructure engineering; MicroStation-native spatial data, OpenUtilities</td><td>Second tier</td></tr>
+    <tr><td><b>Trimble</b></td><td>Survey and field-captured data; Cityworks asset management</td><td>Second tier</td></tr>
+    <tr><td><b>Autodesk</b></td><td>CAD-side spatial: Map 3D, Civil 3D — the substation drawings in the founder's RFP example</td><td>Second tier</td></tr>
+    <tr><td><b>QGIS</b></td><td>Open source — no revenue share, very large seat share in municipalities, NGOs, academia, small utilities</td><td>Unmeasurable in dollars, large in data</td></tr>
+  </table></div>
+  <p>Esri, Hexagon, Trimble, Bentley and HERE together capture roughly 60% by one estimate. The rest is long tail.</p>
+
+  <h3>2. Utility system-of-record — the vertical in question</h3>
+  <ul>
+    <li><b>Esri + Schneider Electric's ArcFM</b> — the dominant North American stack. ArcGIS Utility Network is the modern data model; ArcFM the utility layer on top. Roughly 35–40% of utility GIS deployments globally, a majority in North America.</li>
+    <li><b>GE Vernova Smallworld</b> — the historical rival, strong in gas, telecom and outside North America. 160+ telecom operators and utilities. Still GE Vernova's, inside Electrification Software.</li>
+    <li><b>Hexagon NetWorks / G/Technology</b> — third system-of-record option.</li>
+    <li><b>IQGeo</b> — 520+ customers, positioned as an operational layer <em>alongside</em> Esri or Smallworld rather than replacing them. It ships ETLs against both Esri's Utility Network and Smallworld models — it makes its living reading other vendors' data.</li>
+    <li>Oracle Spatial and Bentley OpenUtilities in the tail.</li>
+  </ul>
+
+  <h3>3. Reference-data vendors — the survey-grade alternatives to TIGER</h3>
+  <ul>
+    <li><b>Roads:</b> HERE and TomTom, the two survey-grade commercial networks; Google Maps Platform; Overture Maps as the open alternative.</li>
+    <li><b>Parcels:</b> Cotality (CoreLogic), LightBox, Regrid.</li>
+    <li><b>Aerial imagery:</b> Nearmap, EagleView, Vexcel — the commercial equivalents of NAIP, at higher resolution and refresh.</li>
+    <li><b>LiDAR:</b> NV5, Woolpert, Dewberry — the contractors who fly most of USGS 3DEP; the data is public, the acquisition capacity is theirs.</li>
+    <li><b>Satellite:</b> Maxar, Planet.</li>
+  </ul>
+
+  <h3>What it means for the moat question</h3>
+  <p>Esri isn't the only incumbent sitting on the data — in utilities specifically, the system of record is split three ways and a fourth company already makes a business of reading all of them. So a startup's private-asset layer can't be "we hold the data." The utility does, inside ArcFM or Smallworld. The moat has to be what's built <em>on top</em> of those systems — the profiled catalog, the failure corpus, the reconciliation data — which means the realistic path is integration partner to Esri, GE Vernova and Hexagon, not competitor. IQGeo is the existence proof that this works and the warning that it caps you as "operational layer, not system of record."</p>
+  <p>The reference-data vendors are the other half: they're who a serious catalog licenses from, and licensing terms become part of the encoding. TIGER is free; HERE isn't; a bid takeoff needs the second.</p>
+  <p class="sources"><b>Sources consulted:</b>
+    <a href="https://www.gminsights.com/industry-analysis/geographic-information-system-gis-market">GM Insights</a>,
+    <a href="https://www.alliedmarketresearch.com/geographic-information-system-gis-software-market">Allied Market Research</a>,
+    <a href="https://www.mordorintelligence.com/industry-reports/geographic-information-system-market">Mordor Intelligence</a>,
+    <a href="https://www.marketsandmarkets.com/Market-Reports/geographic-information-system-market-55818039.html">MarketsandMarkets</a>,
+    <a href="https://atlas.co/blog/top-12-esri-competitors-and-alternatives-in-2026/">Atlas — Esri competitors</a>,
+    <a href="https://sumble.com/tech/smallworld">Sumble — Smallworld</a>,
+    <a href="https://www.gevernova.com/software/blog/geospatial-technology-and-what-it-means-smallworld-gis">GE Vernova — Smallworld</a>,
+    <a href="https://www.sec.gov/Archives/edgar/data/0001996810/000199681026000063/gev1q2026form8-k04222026.pdf">GE Vernova 8-K FY2026</a>,
+    <a href="https://www.iqgeo.com/services/gis-integrations">IQGeo</a>,
+    <a href="https://www.rfp.wiki/specialty-industries/energy-utilities-software/geospatial-information-systems-for-energy-and-utilities/iqgeo">RFP.wiki — IQGeo</a>,
+    <a href="https://www.esri.com/en-us/arcgis/products/arcgis-utility-network/overview">Esri Utility Network</a>,
+    <a href="https://marketintelo.com/report/utility-gis-market">MarketIntelo</a>,
+    <a href="https://www.newton-evans.com/">Newton-Evans Research</a>.
+  </p>
+</section>
+
+<footer>
+  Written by Claude (Fable 5.1), September 2026, at Jeff's request, as a record of the exchange that followed
+  <a href="./">the 311-hotspot map</a> and <a href="./failure-modes.html">the failure-modes page</a>.
+  The founder's message is reproduced as sent; Claude's responses are reproduced with their substance intact. Market figures are estimates from secondary sources and should be read as such.
+</footer>
+</main>
+</body>
+</html>
